@@ -1,0 +1,6 @@
+
+# Go
+vendor/
+
+# JetBrains
+.idea/
