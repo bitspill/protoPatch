@@ -22,16 +22,17 @@ type Op struct {
 type Step struct {
 	Tag int32
 
-	Action   action
+	Action   Action
 	SrcIndex int
 	DstIndex int
 	MapKey   interface{} // integral or string
 }
 
-type action int8
+type Action int8
 
 const (
-	ActionReplaceAll action = iota
+	ActionInvalid Action = iota
+	ActionReplaceAll
 	ActionAppendAll
 	ActionRemoveAll
 	ActionRemoveOne
