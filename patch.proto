@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package patch;
+
+import "google/protobuf/any.proto";
+
+
+message ProtoPatch {
+    google.protobuf.Any newValues = 1;
+    repeated ProtoOp ops = 2;
+}
+
+message ProtoOp {
+    repeated ProtoStep Path = 1;
+}
+
+message ProtoStep {
+    int32 Tag = 1;
+    string Name = 2;
+    string JsonName = 3;
+
+    ProtoAction Action = 4;
+
+    int32 SrcIndex = 5;
+    int32 DstIndex = 6;
+
+    string StrMapKey = 7;
+    int64 IntMapKey = 8;
+    uint64 UIntMapKey = 9;
+    bool BoolMapKey = 10;
+}
+
+enum ProtoAction {
+    ActionInvalid = 0;
+    ActionReplace = 1;
+    ActionAppend = 2;
+    ActionRemove = 3;
+    ActionRemoveOne = 4;
+    ActionReplaceOne = 5;
+    ActionAppendOne = 6;
+    ActionStrPatch = 7;
+    ActionStepInto = 8;
+}
+

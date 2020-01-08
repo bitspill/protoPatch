@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+import "google/protobuf/any.proto";
+
+package test_proto;
+
+message WithAny {
+    google.protobuf.Any a = 1;
+    repeated google.protobuf.Any ra = 2;
+}
+
+message TestMessage {
+    int64 num = 1;
+}

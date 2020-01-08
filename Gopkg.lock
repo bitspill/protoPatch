@@ -2,12 +2,13 @@
 
 
 [[projects]]
-  digest = "1:699ee5cc5503d895dd4106bb687e8a208b71174d54a81e9ac58ee82ad7b4126b"
+  digest = "1:fab646d893820242d3a211d2521f40d2bd4b75783ca64a8d60dccc4f54ecfea1"
   name = "github.com/golang/protobuf"
   packages = [
     "jsonpb",
     "proto",
     "protoc-gen-go/descriptor",
+    "ptypes",
     "ptypes/any",
     "ptypes/duration",
     "ptypes/empty",
@@ -20,7 +21,7 @@
   version = "v1.3.2"
 
 [[projects]]
-  digest = "1:bc26daee1a369778f64e32363932bb74bf45f3992b2f85d17b2240cd2381d71e"
+  digest = "1:cd125a51c22a6a75a4a70352a76f875349c74243ff8b08a4d761f70ac2bd9212"
   name = "github.com/jhump/protoreflect"
   packages = [
     "codec",
@@ -30,8 +31,8 @@
     "internal",
   ]
   pruneopts = "UT"
-  revision = "c67d679c9f863957281faba646d790dbab6cf3b3"
-  version = "v1.5.0"
+  revision = "43f69034e50eb4a370349b6b7194ef0c7b33d5ed"
+  version = "v1.6.0"
 
 [solve-meta]
   analyzer-name = "dep"
@@ -40,6 +41,8 @@
     "github.com/golang/protobuf/jsonpb",
     "github.com/golang/protobuf/proto",
     "github.com/golang/protobuf/protoc-gen-go/descriptor",
+    "github.com/golang/protobuf/ptypes",
+    "github.com/golang/protobuf/ptypes/any",
     "github.com/jhump/protoreflect/desc",
     "github.com/jhump/protoreflect/dynamic",
   ]

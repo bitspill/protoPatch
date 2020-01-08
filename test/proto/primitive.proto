@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package test_proto;
+
+message Primitives {
+    string one = 1;
+    int64 two = 2;
+    double three = 3;
+    bool four = 4;
+    enum Corpus {
+        UNIVERSAL = 0;
+        WEB = 1;
+        IMAGES = 2;
+        LOCAL = 3;
+        NEWS = 4;
+        PRODUCTS = 5;
+        VIDEO = 6;
+    }
+    Corpus corpus = 5;
+    repeated int64 rep = 6;
+    map<int64, string> map_field = 7;
+    SimpleMessage sm = 8;
+    repeated SimpleMessage rsm = 9;
+    map<string, SimpleMessage> msm = 10;
+}
+
+
+message SimpleMessage {
+    int64 one = 1;
+}
+
+message ContainerMessage {
+    SimpleMessage cm = 1;
+    int64 two = 2;
+}

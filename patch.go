@@ -6,13 +6,15 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
+	"github.com/golang/protobuf/ptypes"
+	"github.com/golang/protobuf/ptypes/any"
 	"github.com/jhump/protoreflect/desc"
 	"github.com/jhump/protoreflect/dynamic"
 )
 
 type Patch struct {
 	NewValues proto.Message
-	Ops       []*Op
+	Ops       []Op
 }
 
 type Op struct {
@@ -20,7 +22,9 @@ type Op struct {
 }
 
 type Step struct {
-	Tag int32
+	Tag      int32
+	Name     string
+	JsonName string
 
 	Action   Action
 	SrcIndex int
@@ -32,13 +36,13 @@ type Action int8
 
 const (
 	ActionInvalid Action = iota
-	ActionReplaceAll
-	ActionAppendAll
-	ActionRemoveAll
-	ActionRemoveOne
-	ActionReplaceOne
-	ActionAppendOne
-	ActionStrPatch // ToDo: implement diff-match-patch/unix-diff for string primitive type
+	ActionReplace
+	ActionAppend
+	ActionRemove
+	ActionRemoveOne  // Only valid for repeated or map fields
+	ActionReplaceOne // Only valid for repeated or map fields
+	ActionAppendOne  // Only valid for repeated or map fields
+	ActionStrPatch   // ToDo: implement diff-match-patch/unix-diff for string primitive type
 	ActionStepInto
 )
 
@@ -53,91 +57,38 @@ func ApplyPatch(patch Patch, dst proto.Message) (proto.Message, error) {
 	}
 
 	for _, op := range patch.Ops {
-		var iterStack []stackEntry
+		var iterStack []*stackEntry
 		dIterator := dstDynamic
 		sIterator := srcDynamic
 		for _, step := range op.Path {
 			fmt.Println(step)
-			fieldDescriptor := dIterator.FindFieldDescriptor(step.Tag)
-			if fieldDescriptor == nil {
+			fieldDescriptor, err := getFieldDescriptor(&step, dIterator)
+			if err != nil {
 				return nil, err
 			}
 
 			t := fieldDescriptor.GetType()
 
 			if t == descriptor.FieldDescriptorProto_TYPE_GROUP {
+				// https://developers.google.com/protocol-buffers/docs/proto#groups
+				// Note that this feature is deprecated and should not be used
+				// when creating new message types – use nested message types instead.
 				return nil, errors.New("group type unsupported")
 			}
 
 			if t == descriptor.FieldDescriptorProto_TYPE_MESSAGE && step.Action == ActionStepInto {
-				se := stackEntry{
-					Iter: dIterator,
-					Fd:   fieldDescriptor,
-				}
-
-				var sf interface{}
-				var df interface{}
-
-				switch {
-				case fieldDescriptor.IsMap():
-					sf, err = sIterator.TryGetMapField(fieldDescriptor, step.MapKey)
-					if err != nil {
-						return nil, err
-					}
-					df, err = dIterator.TryGetMapField(fieldDescriptor, step.MapKey)
-					if err != nil {
-						return nil, err
-					}
-					se.Key = step.MapKey
-				case fieldDescriptor.IsRepeated():
-					sf, err = sIterator.TryGetRepeatedField(fieldDescriptor, step.SrcIndex)
-					if err != nil {
-						return nil, err
-					}
-					df, err = dIterator.TryGetRepeatedField(fieldDescriptor, step.DstIndex)
-					if err != nil {
-						return nil, err
-					}
-					se.Index = step.DstIndex
-				default:
-					sf, err = sIterator.TryGetField(fieldDescriptor)
-					if err != nil {
-						return nil, err
-					}
-					df, err = dIterator.TryGetField(fieldDescriptor)
-					if err != nil {
-						return nil, err
-					}
-				}
-
-				psf, ok := sf.(proto.Message)
-				if !ok {
-					return nil, errors.New("field not a message")
-				}
-
-				sIterator, err = toDynamic(psf)
-				if err != nil {
-					return nil, err
-				}
-
-				pdf, ok := df.(proto.Message)
-				if !ok {
-					return nil, errors.New("field not a message")
-				}
-
-				dIterator, err = toDynamic(pdf)
+				var se *stackEntry
+				se, sIterator, dIterator, err = stepIntoMessage(fieldDescriptor, step, sIterator, dIterator)
 				if err != nil {
 					return nil, err
 				}
 
 				iterStack = append(iterStack, se)
-
-				continue
-			}
-
-			err := processPrimitive(step, dIterator, fieldDescriptor, sIterator)
-			if err != nil {
-				return nil, err
+			} else {
+				err = processPrimitive(step, dIterator, fieldDescriptor, sIterator)
+				if err != nil {
+					return nil, err
+				}
 			}
 
 			if len(iterStack) > 0 {
@@ -145,20 +96,9 @@ func ApplyPatch(patch Patch, dst proto.Message) (proto.Message, error) {
 			}
 		}
 
-		// Unwind iter stack of modified nested messages
-		for _, stackVal := range iterStack {
-			var err error
-			switch {
-			case stackVal.Fd.IsMap():
-				err = stackVal.Iter.TryPutMapField(stackVal.Fd, stackVal.Key, stackVal.Res)
-			case stackVal.Fd.IsRepeated():
-				err = stackVal.Iter.TrySetRepeatedField(stackVal.Fd, stackVal.Index, stackVal.Res)
-			default:
-				err = stackVal.Iter.TrySetField(stackVal.Fd, stackVal.Res)
-			}
-			if err != nil {
-				return nil, err
-			}
+		err = applyStack(iterStack)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -170,12 +110,152 @@ func ApplyPatch(patch Patch, dst proto.Message) (proto.Message, error) {
 	return clone, nil
 }
 
+func stepIntoMessage(fieldDescriptor *desc.FieldDescriptor, step Step, sIterator *dynamic.Message, dIterator *dynamic.Message) (*stackEntry, *dynamic.Message, *dynamic.Message, error) {
+	se := &stackEntry{
+		Iter:  dIterator,
+		Fd:    fieldDescriptor,
+		Key:   step.MapKey,
+		Index: step.DstIndex - 1,
+	}
+
+	sfv, dfv, err := getFieldValue(fieldDescriptor, step, sIterator, dIterator)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	if fdIsAny(fieldDescriptor) {
+		// if the field is an any.Any we want the message
+		// contained within not the any.Any itself
+		sfv, err = extractInnerMessageFromAny(sfv)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		dfv, err = extractInnerMessageFromAny(dfv)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+	}
+
+	sIterator, err = toDynamic(sfv)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	dIterator, err = toDynamic(dfv)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return se, sIterator, dIterator, nil
+}
+
+func getFieldValue(fieldDescriptor *desc.FieldDescriptor, step Step, sIterator *dynamic.Message, dIterator *dynamic.Message) (interface{}, interface{}, error) {
+	var sf interface{}
+	var df interface{}
+	var err error
+
+	switch {
+	case fieldDescriptor.IsMap():
+		sf, err = sIterator.TryGetMapField(fieldDescriptor, step.MapKey)
+		if err != nil {
+			return nil, nil, err
+		}
+		df, err = dIterator.TryGetMapField(fieldDescriptor, step.MapKey)
+		if err != nil {
+			return nil, nil, err
+		}
+	case fieldDescriptor.IsRepeated():
+		sf, err = sIterator.TryGetRepeatedField(fieldDescriptor, step.SrcIndex-1)
+		if err != nil {
+			return nil, nil, err
+		}
+		df, err = dIterator.TryGetRepeatedField(fieldDescriptor, step.DstIndex-1)
+		if err != nil {
+			return nil, nil, err
+		}
+	default:
+		sf, err = sIterator.TryGetField(fieldDescriptor)
+		if err != nil {
+			return nil, nil, err
+		}
+		df, err = dIterator.TryGetField(fieldDescriptor)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return sf, df, err
+}
+
+func applyStack(iterStack []*stackEntry) error {
+	for _, stackVal := range iterStack {
+		res := stackVal.Res
+
+		if fdIsAny(stackVal.Fd) {
+			resAny, err := ptypes.MarshalAny(stackVal.Res)
+			if err != nil {
+				return err
+			}
+			// res, err = toDynamic(resAny)
+			// if err != nil {
+			// 	return err
+			// }
+			res = resAny
+		}
+
+		var err error
+		switch {
+		case stackVal.Fd.IsMap():
+			err = stackVal.Iter.TryPutMapField(stackVal.Fd, stackVal.Key, res)
+		case stackVal.Fd.IsRepeated():
+			err = stackVal.Iter.TrySetRepeatedField(stackVal.Fd, stackVal.Index, res)
+		default:
+			err = stackVal.Iter.TrySetField(stackVal.Fd, res)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func extractInnerMessageFromAny(a interface{}) (proto.Message, error) {
+	sAny, ok := a.(*any.Any)
+	if !ok {
+		return nil, errors.New("not an any")
+	}
+
+	dynAny := &ptypes.DynamicAny{}
+	err := ptypes.UnmarshalAny(sAny, dynAny)
+	if err != nil {
+		return nil, err
+	}
+
+	return dynAny.Message, nil
+}
+
+func getFieldDescriptor(step *Step, dIterator *dynamic.Message) (*desc.FieldDescriptor, error) {
+	var fieldDescriptor *desc.FieldDescriptor
+	if step.Tag != 0 {
+		fieldDescriptor = dIterator.FindFieldDescriptor(step.Tag)
+	} else if step.Name != "" {
+		fieldDescriptor = dIterator.FindFieldDescriptorByName(step.Name)
+	} else {
+		fieldDescriptor = dIterator.FindFieldDescriptorByJSONName(step.JsonName)
+	}
+
+	if fieldDescriptor == nil {
+		return nil, errors.New("field not found")
+	}
+
+	return fieldDescriptor, nil
+}
+
 func processPrimitive(step Step, dIterator *dynamic.Message, fd *desc.FieldDescriptor, sIterator *dynamic.Message) error {
 	var err error
 	switch {
-	case step.Action == ActionRemoveAll:
+	case step.Action == ActionRemove:
 		err = dIterator.TryClearField(fd)
-	case step.Action == ActionReplaceAll:
+	case step.Action == ActionReplace:
 		var v interface{}
 		v, err = sIterator.TryGetField(fd)
 		if err == nil {
@@ -196,7 +276,7 @@ func processPrimitive(step Step, dIterator *dynamic.Message, fd *desc.FieldDescr
 
 func processRepeatedPrimitive(step Step, sIterator *dynamic.Message, fd *desc.FieldDescriptor, dIterator *dynamic.Message) error {
 	switch step.Action {
-	case ActionAppendAll:
+	case ActionAppend:
 		interfaceVal, err := sIterator.TryGetField(fd)
 		if err != nil {
 			return err
@@ -263,7 +343,7 @@ func processRepeatedPrimitive(step Step, sIterator *dynamic.Message, fd *desc.Fi
 
 func processMapPrimitive(step Step, sIterator *dynamic.Message, fd *desc.FieldDescriptor, dIterator *dynamic.Message) error {
 	switch step.Action {
-	case ActionReplaceAll:
+	case ActionReplace:
 		v, err := sIterator.TryGetField(fd)
 		if err != nil {
 			return err
@@ -287,7 +367,7 @@ func processMapPrimitive(step Step, sIterator *dynamic.Message, fd *desc.FieldDe
 		if err != nil {
 			return err
 		}
-	case ActionAppendAll:
+	case ActionAppend:
 		iv, err := sIterator.TryGetField(fd)
 		if err != nil {
 			return err
@@ -306,18 +386,23 @@ func processMapPrimitive(step Step, sIterator *dynamic.Message, fd *desc.FieldDe
 	return nil
 }
 
-func toDynamic(p proto.Message) (*dynamic.Message, error) {
-	dm, err := dynamic.AsDynamicMessage(p)
-	if err != nil {
-		return nil, err
+func toDynamic(i interface{}) (*dynamic.Message, error) {
+	if p, ok := i.(proto.Message); ok {
+		return dynamic.AsDynamicMessage(p)
+	} else {
+		return nil, errors.New("not a proto.Message")
 	}
-	return dm, nil
 }
 
 type stackEntry struct {
 	Iter  *dynamic.Message
 	Fd    *desc.FieldDescriptor
-	Res   *dynamic.Message
+	Res   proto.Message
 	Index int
 	Key   interface{}
+}
+
+func fdIsAny(fd *desc.FieldDescriptor) bool {
+	return fd.GetMessageType().
+		GetFullyQualifiedName() == "google.protobuf.Any"
 }
