@@ -143,6 +143,7 @@ func TestAny(t *testing.T) {
 }
 
 func TestNestedAny(t *testing.T) {
+	// ToDo: known broken
 	t.SkipNow()
 	origA := &test_proto.TestMessage{Num: 1}
 	// origRa1 := &test_proto.TestMessage{Num: 6}

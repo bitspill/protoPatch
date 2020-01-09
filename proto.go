@@ -35,17 +35,17 @@ func ToProto(patch *Patch) (proto.Message, error) {
 
 			switch k := step.MapKey.(type) {
 			case int32:
-				pStep.IntMapKey = int64(k)
+				pStep.MapKey = &ProtoStep_IntMapKey{IntMapKey: int64(k)}
 			case int64:
-				pStep.IntMapKey = k
+				pStep.MapKey = &ProtoStep_IntMapKey{IntMapKey: k}
 			case uint32:
-				pStep.UIntMapKey = uint64(k)
+				pStep.MapKey = &ProtoStep_UIntMapKey{UIntMapKey: uint64(k)}
 			case uint64:
-				pStep.UIntMapKey = k
+				pStep.MapKey = &ProtoStep_UIntMapKey{UIntMapKey: k}
 			case bool:
-				pStep.BoolMapKey = k
+				pStep.MapKey = &ProtoStep_BoolMapKey{BoolMapKey: k}
 			case string:
-				pStep.StrMapKey = k
+				pStep.MapKey = &ProtoStep_StrMapKey{StrMapKey: k}
 			}
 
 			pop.Path = append(pop.Path, pStep)
@@ -146,21 +146,21 @@ func protoActionToAction(action ProtoAction) Action {
 }
 
 func getMapKey(step *ProtoStep) interface{} {
-	if step.StrMapKey != "" {
-		return step.StrMapKey
+	mapKey := step.GetMapKey()
+	if mapKey == nil {
+		return nil
 	}
 
-	if step.UIntMapKey != 0 {
-		return step.UIntMapKey
+	switch key := mapKey.(type) {
+	case *ProtoStep_IntMapKey:
+		return key.IntMapKey
+	case *ProtoStep_BoolMapKey:
+		return key.BoolMapKey
+	case *ProtoStep_StrMapKey:
+		return key.StrMapKey
+	case *ProtoStep_UIntMapKey:
+		return key.UIntMapKey
+	default:
+		return nil
 	}
-
-	if step.IntMapKey != 0 {
-		return step.IntMapKey
-	}
-
-	if step.BoolMapKey {
-		return true
-	}
-
-	return nil
 }

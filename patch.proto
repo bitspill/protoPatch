@@ -24,10 +24,12 @@ message ProtoStep {
     int32 SrcIndex = 5;
     int32 DstIndex = 6;
 
-    string StrMapKey = 7;
-    int64 IntMapKey = 8;
-    uint64 UIntMapKey = 9;
-    bool BoolMapKey = 10;
+    oneof MapKey {
+        string StrMapKey = 7;
+        int64 IntMapKey = 8;
+        uint64 UIntMapKey = 9;
+        bool BoolMapKey = 10;
+    }
 }
 
 enum ProtoAction {
