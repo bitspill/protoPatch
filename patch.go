@@ -2,7 +2,6 @@ package patch
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/golang/protobuf/protoc-gen-go/descriptor"
@@ -61,7 +60,6 @@ func ApplyPatch(patch Patch, dst proto.Message) (proto.Message, error) {
 		dIterator := dstDynamic
 		sIterator := srcDynamic
 		for _, step := range op.Path {
-			fmt.Println(step)
 			fieldDescriptor, err := getFieldDescriptor(&step, dIterator)
 			if err != nil {
 				return nil, err
