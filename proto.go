@@ -15,12 +15,12 @@ func ToProto(patch *Patch) (proto.Message, error) {
 
 	pp := &ProtoPatch{
 		NewValues: newValAny,
-		Ops:       make([]*ProtoOp, len(patch.Ops)),
+		Ops:       make([]*ProtoOp, 0, len(patch.Ops)),
 	}
 
 	for _, op := range patch.Ops {
 		pop := &ProtoOp{
-			Path: make([]*ProtoStep, len(op.Path)),
+			Path: make([]*ProtoStep, 0, len(op.Path)),
 		}
 		for _, step := range op.Path {
 			pStep := &ProtoStep{
@@ -70,12 +70,12 @@ func FromProto(message proto.Message) (*Patch, error) {
 
 	patch := &Patch{
 		NewValues: dynAny.Message,
-		Ops:       make([]Op, len(pp.Ops)),
+		Ops:       make([]Op, 0, len(pp.Ops)),
 	}
 
 	for _, protoOp := range pp.Ops {
 		op := Op{
-			Path: make([]Step, len(protoOp.Path)),
+			Path: make([]Step, 0, len(protoOp.Path)),
 		}
 		for _, protoStep := range protoOp.Path {
 			step := Step{
